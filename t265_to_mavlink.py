@@ -45,6 +45,9 @@ def progress(string):
 # Parameters
 #######################################
 
+jump_threshold = 0.1 # in meters, from trials and errors, should be relative to how frequent is the position data obtained (200Hz for the T265)
+jump_speed_threshold = 20.0 # in m/s from trials and errors, should be relative to how frequent is the velocity data obtained (200Hz for the T265)
+
 # Default configurations for connection to the FCU
 connection_string_default = '/dev/serial0'
 connection_baudrate_default = 115200
@@ -500,6 +503,54 @@ conn = mavutil.mavlink_connection(
     force_connected=True,
 )
 
+# --------------------------------------
+# setup position threshold by parameters
+param_pos_received = False
+
+while not param_pos_received:
+    
+    conn.mav.param_request_read_send(
+        conn.target_system, conn.target_component,
+        b'VISO_TH_POS',
+        -1
+    )
+
+    message = conn.recv_match(type='PARAM_VALUE', blocking=True).to_dict()
+    print(message)
+
+    if message['param_id'] != 'VISO_TH_POS':
+        print('skipping ^^^^^^^^^^^^^^^^^')
+        continue
+
+    print('asigning value pos!')
+    jump_threshold = message['param_value']
+    send_msg_to_gcs('position threshold: ' + str(jump_threshold))
+    param_pos_received = True
+
+# --------------------------------------
+# setup velocity threshold by parameters
+param_vel_received = False
+
+while not param_vel_received:
+
+    conn.mav.param_request_read_send(
+        conn.target_system, conn.target_component,
+        b'VISO_TH_VEL',
+        -1
+    )
+    
+    message = conn.recv_match(type='PARAM_VALUE', blocking=True).to_dict()
+    print(message)
+    
+    if message['param_id'] != 'VISO_TH_VEL':
+        print('skipping ^^^^^^^^^^^^^^^^^')
+        continue
+
+    print('asigning value vel!')
+    jump_speed_threshold = message['param_value']
+    send_msg_to_gcs('vel threshold: ' + str(jump_speed_threshold))
+    param_vel_received = True
+
 mavlink_callbacks = {
     'ATTITUDE': att_msg_callback,
 }
@@ -615,8 +666,7 @@ try:
                     speed_delta = np.linalg.norm(delta_velocity)
 
                     # Pose jump is indicated when position changes abruptly. The behavior is not well documented yet (as of librealsense 2.34.0)
-                    jump_threshold = 0.1 # in meters, from trials and errors, should be relative to how frequent is the position data obtained (200Hz for the T265)
-                    jump_speed_threshold = 20.0 # in m/s from trials and errors, should be relative to how frequent is the velocity data obtained (200Hz for the T265)
+                    # print(jump_threshold)
                     if (position_displacement > jump_threshold) or (speed_delta > jump_speed_threshold):
                         send_msg_to_gcs('VISO jump detected')
                         if position_displacement > jump_threshold:
