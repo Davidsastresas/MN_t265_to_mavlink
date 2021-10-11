@@ -527,7 +527,7 @@ while not param_pos_received:
 
     print('asigning value pos!')
     jump_threshold = message['param_value']
-    send_msg_to_gcs('position threshold: ' + str(jump_threshold))
+    send_msg_to_gcs('position threshold: ' + "{:.4f}".format(jump_threshold))
     param_pos_received = True
 
 # --------------------------------------
@@ -551,7 +551,7 @@ while not param_vel_received:
 
     print('asigning value vel!')
     jump_speed_threshold = message['param_value']
-    send_msg_to_gcs('vel threshold: ' + str(jump_speed_threshold))
+    send_msg_to_gcs('vel threshold: ' + "{:.4f}".format(jump_speed_threshold))
     param_vel_received = True
 
 mavlink_callbacks = {
