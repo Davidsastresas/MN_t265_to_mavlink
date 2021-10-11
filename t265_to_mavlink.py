@@ -47,6 +47,11 @@ def progress(string):
 
 jump_threshold = 0.1 # in meters, from trials and errors, should be relative to how frequent is the position data obtained (200Hz for the T265)
 jump_speed_threshold = 20.0 # in m/s from trials and errors, should be relative to how frequent is the velocity data obtained (200Hz for the T265)
+#T265 specific options
+mapping_enabled = 0.0 #R2 mapping enable option 
+pose_jumping = 0.0 #R2 pose jumping enable option
+relocalization = 0.0 #R2 relocalization enable option
+map_preservation = 0.0 #R2 map_preservation enable option
 
 # if no frames are received after this, reboot script
 wait_for_frames_timeout = 60000
@@ -122,6 +127,7 @@ exit_code = 1
 # Camera-related variables
 pipe = None
 pose_sensor = None
+cfg = None
 linear_accel_cov = 0.01
 angular_vel_cov  = 0.01
 
@@ -435,7 +441,7 @@ def realsense_notification_callback(notif):
         send_msg_to_gcs('Relocalization detected')
 
 def realsense_connect():
-    global pipe, pose_sensor
+    global pipe, pose_sensor, cfg
     
     # Declare RealSense pipeline, encapsulating the actual device and sensors
     pipe = rs.pipeline()
@@ -451,6 +457,10 @@ def realsense_connect():
     pose_sensor = device.first_pose_sensor()
     pose_sensor.set_notifications_callback(realsense_notification_callback)
 
+# We need to separate the pipe.start() since we need to set the parameters after the pose_sensor
+# has been defined, but before we start streaming
+def realsense_start_stream():
+    global cfg
     # Start streaming with requested config
     pipe.start(cfg)
 
@@ -554,13 +564,6 @@ while not param_vel_received:
     send_msg_to_gcs('vel threshold: ' + "{:.4f}".format(jump_speed_threshold))
     param_vel_received = True
 
-mavlink_callbacks = {
-    'ATTITUDE': att_msg_callback,
-}
-
-mavlink_thread = threading.Thread(target=mavlink_loop, args=(conn, mavlink_callbacks))
-mavlink_thread.start()
-
 # connecting and configuring the camera is a little hit-and-miss.
 # Start a timer and rely on a restart of the script to get it working.
 # Configuring the camera appears to block all threads, so we can't do
@@ -571,7 +574,127 @@ signal.setitimer(signal.ITIMER_REAL, 5)  # seconds...
 
 send_msg_to_gcs('Connecting to camera...')
 realsense_connect()
+# --------------------------------------
+#We need the camera connected to change its options
+# setup T265 specific options by parameter
+#
+#Mapping Enable
+param_mapping_enabled_received = False
+
+while not param_mapping_enabled_received:
+    
+    conn.mav.param_request_read_send(
+        conn.target_system, conn.target_component,
+        b'VISO_MAP_EN',
+        -1
+    )
+
+    message = conn.recv_match(type='PARAM_VALUE', blocking=True).to_dict()
+    print(message)
+
+    if message['param_id'] != 'VISO_MAP_EN':
+        print('skipping ^^^^^^^^^^^^^^^^^')
+        continue
+
+    print('asigning value mapping enabled!')
+    mapping_enabled = message['param_value']
+    pose_sensor.set_option(rs.option.enable_mapping, mapping_enabled)
+    send_msg_to_gcs('Mapping enable: ' + "{:.1f}".format(pose_sensor.get_option(rs.option.enable_mapping)))
+    param_mapping_enabled_received = True
+
+#If Mapping Enabled is disabled. Then dont check all other options as they dont matter
+if pose_sensor.get_option(rs.option.enable_mapping):
+    #Pose Jumping
+    param_pose_jumping_received = False
+
+    while not param_pose_jumping_received:
+        
+        conn.mav.param_request_read_send(
+            conn.target_system, conn.target_component,
+            b'VISO_POS_JMP',
+            -1
+        )
+
+        message = conn.recv_match(type='PARAM_VALUE', blocking=True).to_dict()
+        print(message)
+
+        if message['param_id'] != 'VISO_POS_JMP':
+            print('skipping ^^^^^^^^^^^^^^^^^')
+            continue
+
+        print('asigning value to position jumping!')
+        pose_jumping = message['param_value']
+        pose_sensor.set_option(rs.option.enable_pose_jumping, pose_jumping)
+        send_msg_to_gcs('Pose jumping: ' + "{:.1f}".format(pose_sensor.get_option(rs.option.enable_pose_jumping)))
+        param_pose_jumping_received = True
+
+    #Relocalization
+    param_relocalization_received = False
+
+    while not param_relocalization_received:
+        
+        conn.mav.param_request_read_send(
+            conn.target_system, conn.target_component,
+            b'VISO_RELOC',
+            -1
+        )
+
+        message = conn.recv_match(type='PARAM_VALUE', blocking=True).to_dict()
+        print(message)
+
+        if message['param_id'] != 'VISO_RELOC':
+            print('skipping ^^^^^^^^^^^^^^^^^')
+            continue
+
+        print('asigning value to relocalization!')
+        relocalization = message['param_value']
+        
+        pose_sensor.set_option(rs.option.enable_relocalization, relocalization)
+        send_msg_to_gcs('Relocalization: ' + "{:.1f}".format(pose_sensor.get_option(rs.option.enable_relocalization)))
+        param_relocalization_received = True
+
+    #Map preservation
+    param_map_preservation_received = False
+
+    while not param_map_preservation_received:
+        
+        conn.mav.param_request_read_send(
+            conn.target_system, conn.target_component,
+            b'VISO_MAP_PRS',
+            -1
+        )
+
+        message = conn.recv_match(type='PARAM_VALUE', blocking=True).to_dict()
+        print(message)
+
+        if message['param_id'] != 'VISO_MAP_PRS':
+            print('skipping ^^^^^^^^^^^^^^^^^')
+            continue
+
+        print('asigning value to map preservation!')
+        map_preservation = message['param_value']
+        pose_sensor.set_option(rs.option.enable_map_preservation, map_preservation)
+        send_msg_to_gcs('Map Preservation: ' + "{:.1f}".format(pose_sensor.get_option(rs.option.enable_map_preservation)))
+        param_map_preservation_received = True
+else:
+    print('Mapping Enable is not set. So no more options available')
+
+# --------------------------------------
+
+
+#After setting all options we can now start streaming
+realsense_start_stream()
 send_msg_to_gcs('Camera connected.')
+
+#We move the mavlink thread start after we do all the param stuff to have the port available
+mavlink_callbacks = {
+    'ATTITUDE': att_msg_callback,
+}
+
+mavlink_thread = threading.Thread(target=mavlink_loop, args=(conn, mavlink_callbacks))
+mavlink_thread.start()
+
+
 
 signal.setitimer(signal.ITIMER_REAL, 0)  # cancel alarm
 
