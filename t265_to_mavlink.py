@@ -48,6 +48,9 @@ def progress(string):
 jump_threshold = 0.1 # in meters, from trials and errors, should be relative to how frequent is the position data obtained (200Hz for the T265)
 jump_speed_threshold = 20.0 # in m/s from trials and errors, should be relative to how frequent is the velocity data obtained (200Hz for the T265)
 
+# if no frames are received after this, reboot script
+wait_for_frames_timeout = 60000
+
 # Default configurations for connection to the FCU
 connection_string_default = '/dev/serial0'
 connection_baudrate_default = 115200
@@ -625,7 +628,7 @@ send_msg_to_gcs('Sending vision messages to FCU')
 try:
     while not main_loop_should_quit:
         # Wait for the next set of frames from the camera
-        frames = pipe.wait_for_frames()
+        frames = pipe.wait_for_frames(wait_for_frames_timeout)
 
         # Fetch pose frame
         pose = frames.get_pose_frame()
