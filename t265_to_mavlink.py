@@ -794,10 +794,11 @@ try:
                     # Pose jump is indicated when position changes abruptly. The behavior is not well documented yet (as of librealsense 2.34.0)
                     # print(jump_threshold)
                     if (position_displacement > jump_threshold) or (speed_delta > jump_speed_threshold):
-                        send_msg_to_gcs('VISO jump detected')
                         if position_displacement > jump_threshold:
+                            send_msg_to_gcs('VISO jump detected (POS)')
                             progress("Position jumped by: %s" % position_displacement)
                         elif speed_delta > jump_speed_threshold:
+                            send_msg_to_gcs('VISO jump detected (VEL)')
                             progress("Speed jumped by: %s" % speed_delta)
                         increment_reset_counter()
                     
