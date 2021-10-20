@@ -54,7 +54,7 @@ relocalization = 0.0 #R2 relocalization enable option
 map_preservation = 0.0 #R2 map_preservation enable option
 
 # if no frames are received after this, reboot script
-wait_for_frames_timeout = 60000
+wait_for_frames_timeout = 1000
 
 # Default configurations for connection to the FCU
 connection_string_default = '/dev/serial0'
