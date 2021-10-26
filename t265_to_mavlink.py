@@ -145,6 +145,11 @@ current_time_us = 0
 # For AP, a non-zero "reset_counter" would mean that we could be sure that the user's setup was using mavlink2
 reset_counter = 1
 
+#Consumed data in messages
+consumed_by_pos_msg = False
+consumed_by_vel_msg = False
+consumed_by_delta_msg = False
+
 #######################################
 # Parsing user' inputs
 #######################################
@@ -277,83 +282,92 @@ def mavlink_loop(conn, callbacks):
 
 # https://mavlink.io/en/messages/common.html#VISION_POSITION_ESTIMATE
 def send_vision_position_estimate_message():
-    global current_time_us, H_aeroRef_aeroBody, reset_counter
+    global current_time_us, H_aeroRef_aeroBody, reset_counter, consumed_by_pos_msg
     with lock:
         if H_aeroRef_aeroBody is not None:
-            # Setup angle data
-            rpy_rad = np.array( tf.euler_from_matrix(H_aeroRef_aeroBody, 'sxyz'))
+            if not consumed_by_pos_msg:
+                # Setup angle data
+                rpy_rad = np.array( tf.euler_from_matrix(H_aeroRef_aeroBody, 'sxyz'))
 
-            # Setup covariance data, which is the upper right triangle of the covariance matrix, see here: https://files.gitter.im/ArduPilot/VisionProjects/1DpU/image.png
-            # Attemp #01: following this formula https://github.com/IntelRealSense/realsense-ros/blob/development/realsense2_camera/src/base_realsense_node.cpp#L1406-L1411
-            cov_pose    = linear_accel_cov * pow(10, 3 - int(data.tracker_confidence))
-            cov_twist   = angular_vel_cov  * pow(10, 1 - int(data.tracker_confidence))
-            covariance  = np.array([cov_pose, 0, 0, 0, 0, 0,
-                                       cov_pose, 0, 0, 0, 0,
-                                          cov_pose, 0, 0, 0,
-                                            cov_twist, 0, 0,
-                                               cov_twist, 0,
-                                                  cov_twist])
+                # Setup covariance data, which is the upper right triangle of the covariance matrix, see here: https://files.gitter.im/ArduPilot/VisionProjects/1DpU/image.png
+                # Attemp #01: following this formula https://github.com/IntelRealSense/realsense-ros/blob/development/realsense2_camera/src/base_realsense_node.cpp#L1406-L1411
+                cov_pose    = linear_accel_cov * pow(10, 3 - int(data.tracker_confidence))
+                cov_twist   = angular_vel_cov  * pow(10, 1 - int(data.tracker_confidence))
+                covariance  = np.array([cov_pose, 0, 0, 0, 0, 0,
+                                        cov_pose, 0, 0, 0, 0,
+                                            cov_pose, 0, 0, 0,
+                                                cov_twist, 0, 0,
+                                                cov_twist, 0,
+                                                    cov_twist])
 
-            # Send the message
-            conn.mav.vision_position_estimate_send(
-                current_time_us,            # us Timestamp (UNIX time or time since system boot)
-                H_aeroRef_aeroBody[0][3],   # Global X position
-                H_aeroRef_aeroBody[1][3],   # Global Y position
-                H_aeroRef_aeroBody[2][3],   # Global Z position
-                rpy_rad[0],	                # Roll angle
-                rpy_rad[1],	                # Pitch angle
-                rpy_rad[2],	                # Yaw angle
-                covariance,                 # Row-major representation of pose 6x6 cross-covariance matrix
-                reset_counter               # Estimate reset counter. Increment every time pose estimate jumps.
-            )
+                # Send the message
+                conn.mav.vision_position_estimate_send(
+                    current_time_us,            # us Timestamp (UNIX time or time since system boot)
+                    H_aeroRef_aeroBody[0][3],   # Global X position
+                    H_aeroRef_aeroBody[1][3],   # Global Y position
+                    H_aeroRef_aeroBody[2][3],   # Global Z position
+                    rpy_rad[0],	                # Roll angle
+                    rpy_rad[1],	                # Pitch angle
+                    rpy_rad[2],	                # Yaw angle
+                    covariance,                 # Row-major representation of pose 6x6 cross-covariance matrix
+                    reset_counter               # Estimate reset counter. Increment every time pose estimate jumps.
+                )
+
+                consumed_by_pos_msg = True
 
 # https://mavlink.io/en/messages/ardupilotmega.html#VISION_POSITION_DELTA
 def send_vision_position_delta_message():
-    global current_time_us, current_confidence_level, H_aeroRef_aeroBody
+    global current_time_us, current_confidence_level, H_aeroRef_aeroBody, consumed_by_delta_msg
     with lock:
         if H_aeroRef_aeroBody is not None:
-            # Calculate the deltas in position, attitude and time from the previous to current orientation
-            H_aeroRef_PrevAeroBody      = send_vision_position_delta_message.H_aeroRef_PrevAeroBody
-            H_PrevAeroBody_CurrAeroBody = (np.linalg.inv(H_aeroRef_PrevAeroBody)).dot(H_aeroRef_aeroBody)
+            if not consumed_by_delta_msg:
+                # Calculate the deltas in position, attitude and time from the previous to current orientation
+                H_aeroRef_PrevAeroBody      = send_vision_position_delta_message.H_aeroRef_PrevAeroBody
+                H_PrevAeroBody_CurrAeroBody = (np.linalg.inv(H_aeroRef_PrevAeroBody)).dot(H_aeroRef_aeroBody)
 
-            delta_time_us    = current_time_us - send_vision_position_delta_message.prev_time_us
-            delta_position_m = [H_PrevAeroBody_CurrAeroBody[0][3], H_PrevAeroBody_CurrAeroBody[1][3], H_PrevAeroBody_CurrAeroBody[2][3]]
-            delta_angle_rad  = np.array( tf.euler_from_matrix(H_PrevAeroBody_CurrAeroBody, 'sxyz'))
+                delta_time_us    = current_time_us - send_vision_position_delta_message.prev_time_us
+                delta_position_m = [H_PrevAeroBody_CurrAeroBody[0][3], H_PrevAeroBody_CurrAeroBody[1][3], H_PrevAeroBody_CurrAeroBody[2][3]]
+                delta_angle_rad  = np.array( tf.euler_from_matrix(H_PrevAeroBody_CurrAeroBody, 'sxyz'))
 
-            # Send the message
-            conn.mav.vision_position_delta_send(
-                current_time_us,    # us: Timestamp (UNIX time or time since system boot)
-                delta_time_us,	    # us: Time since last reported camera frame
-                delta_angle_rad,    # float[3] in radian: Defines a rotation vector in body frame that rotates the vehicle from the previous to the current orientation
-                delta_position_m,   # float[3] in m: Change in position from previous to current frame rotated into body frame (0=forward, 1=right, 2=down)
-                current_confidence_level # Normalized confidence value from 0 to 100. 
-            )
+                # Send the message
+                conn.mav.vision_position_delta_send(
+                    current_time_us,    # us: Timestamp (UNIX time or time since system boot)
+                    delta_time_us,	    # us: Time since last reported camera frame
+                    delta_angle_rad,    # float[3] in radian: Defines a rotation vector in body frame that rotates the vehicle from the previous to the current orientation
+                    delta_position_m,   # float[3] in m: Change in position from previous to current frame rotated into body frame (0=forward, 1=right, 2=down)
+                    current_confidence_level # Normalized confidence value from 0 to 100. 
+                )
 
-            # Save static variables
-            send_vision_position_delta_message.H_aeroRef_PrevAeroBody = H_aeroRef_aeroBody
-            send_vision_position_delta_message.prev_time_us = current_time_us
+                # Save static variables
+                send_vision_position_delta_message.H_aeroRef_PrevAeroBody = H_aeroRef_aeroBody
+                send_vision_position_delta_message.prev_time_us = current_time_us
+
+                consumed_by_delta_msg = True
 
 # https://mavlink.io/en/messages/common.html#VISION_SPEED_ESTIMATE
 def send_vision_speed_estimate_message():
-    global current_time_us, V_aeroRef_aeroBody, reset_counter
+    global current_time_us, V_aeroRef_aeroBody, reset_counter, consumed_by_vel_msg
     with lock:
         if V_aeroRef_aeroBody is not None:
+            if not consumed_by_vel_msg:
 
-            # Attemp #01: following this formula https://github.com/IntelRealSense/realsense-ros/blob/development/realsense2_camera/src/base_realsense_node.cpp#L1406-L1411
-            cov_pose    = linear_accel_cov * pow(10, 3 - int(data.tracker_confidence))
-            covariance  = np.array([cov_pose,   0,          0,
-                                    0,          cov_pose,   0,
-                                    0,          0,          cov_pose])
-            
-            # Send the message
-            conn.mav.vision_speed_estimate_send(
-                current_time_us,            # us Timestamp (UNIX time or time since system boot)
-                V_aeroRef_aeroBody[0][3],   # Global X speed
-                V_aeroRef_aeroBody[1][3],   # Global Y speed
-                V_aeroRef_aeroBody[2][3],   # Global Z speed
-                covariance,                 # covariance
-                reset_counter               # Estimate reset counter. Increment every time pose estimate jumps.
-            )
+                # Attemp #01: following this formula https://github.com/IntelRealSense/realsense-ros/blob/development/realsense2_camera/src/base_realsense_node.cpp#L1406-L1411
+                cov_pose    = linear_accel_cov * pow(10, 3 - int(data.tracker_confidence))
+                covariance  = np.array([cov_pose,   0,          0,
+                                        0,          cov_pose,   0,
+                                        0,          0,          cov_pose])
+                
+                # Send the message
+                conn.mav.vision_speed_estimate_send(
+                    current_time_us,            # us Timestamp (UNIX time or time since system boot)
+                    V_aeroRef_aeroBody[0][3],   # Global X speed
+                    V_aeroRef_aeroBody[1][3],   # Global Y speed
+                    V_aeroRef_aeroBody[2][3],   # Global Z speed
+                    covariance,                 # covariance
+                    reset_counter               # Estimate reset counter. Increment every time pose estimate jumps.
+                )
+
+                consumed_by_vel_msg = True
 
 # Update the changes of confidence level on GCS and terminal
 def update_tracking_confidence_to_gcs():
@@ -822,6 +836,11 @@ try:
                     progress("DEBUG: NED RPY[deg]: {}".format( np.array( tf.euler_from_matrix( H_aeroRef_aeroBody, 'sxyz')) * 180 / m.pi))
                     progress("DEBUG: Raw pos xyz : {}".format( np.array( [data.translation.x, data.translation.y, data.translation.z])))
                     progress("DEBUG: NED pos xyz : {}".format( np.array( tf.translation_from_matrix( H_aeroRef_aeroBody))))
+
+                #Flags for consumed data
+                consumed_by_pos_msg = False
+                consumed_by_vel_msg = False
+                consumed_by_delta_msg = False
 
 except Exception as e:
     progress(e)
