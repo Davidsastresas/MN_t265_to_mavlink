@@ -28,6 +28,7 @@ import time
 import argparse
 import threading
 import signal
+import RPi.GPIO as GPIO
 
 from time import sleep
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -52,6 +53,8 @@ mapping_enabled = 0.0 #R2 mapping enable option
 pose_jumping = 0.0 #R2 pose jumping enable option
 relocalization = 0.0 #R2 relocalization enable option
 map_preservation = 0.0 #R2 map_preservation enable option
+#GPIO 
+mosfet = 16 #mosfet controlling t265 power
 
 # if no frames are received after this, reboot script
 wait_for_frames_timeout = 100
@@ -858,4 +861,12 @@ finally:
     mavlink_thread.join()
     conn.close()
     progress("INFO: Realsense pipeline and vehicle object closed.")
+    #Now reboot camera using a GPIO to acces the mosfet before rebooting the script
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(mosfet, GPIO.OUT) #Set GPIO20 of the BCM as output
+    GPIO.output(mosfet,True)
+    time.sleep(0.1)
+    GPIO.output(mosfet,False)
+    GPIO.cleanup()
+    #Finally exit
     sys.exit(exit_code)
