@@ -57,7 +57,7 @@ map_preservation = 0.0 #R2 map_preservation enable option
 mosfet = 16 #mosfet controlling t265 power
 
 # if no frames are received after this, reboot script
-wait_for_frames_timeout = 100
+wait_for_frames_timeout = 500
 
 # Default configurations for connection to the FCU
 connection_string_default = '/dev/serial0'
