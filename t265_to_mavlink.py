@@ -28,7 +28,7 @@ import time
 import argparse
 import threading
 import signal
-import RPi.GPIO as gpio
+import RPi.GPIO as GPIO
 
 from time import sleep
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -55,12 +55,11 @@ relocalization = 0.0 #R2 relocalization enable option
 map_preservation = 0.0 #R2 map_preservation enable option
 #GPIO 
 mosfet = 16 #mosfet controlling t265 power
-gpio.setmode(gpio.BCM)
-gpio.setup(mosfet, gpio.OUT) #Set gpio20 of the BCM as output
-gpio.output(mosfet,gpio.LOW)
-
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(mosfet, GPIO.OUT) #Set GPIO20 of the BCM as output
+GPIO.output(mosfet,GPIO.HIGH)
 # if no frames are received after this, reboot script
-wait_for_frames_timeout = 500
+wait_for_frames_timeout = 400
 
 # Default configurations for connection to the FCU
 connection_string_default = '/dev/serial0'
@@ -787,6 +786,11 @@ try:
                 
                 # Confidence level value from T265: 0-3, remapped to 0 - 100: 0% - Failed / 33.3% - Low / 66.6% - Medium / 100% - High  
                 current_confidence_level = float(data.tracker_confidence * 100 / 3)  
+                
+                # 0 should be tracking failed, see above
+                if (data.tracker_confidence == 0):
+                    send_msg_to_gcs('Reset due to tracking failed')
+                    main_loop_should_quit = True
 
                 # In transformations, Quaternions w+ix+jy+kz are represented as [w, x, y, z]!
                 H_T265Ref_T265body = tf.quaternion_matrix([data.rotation.w, data.rotation.x, data.rotation.y, data.rotation.z]) 
@@ -865,9 +869,11 @@ finally:
     conn.close()
     progress("INFO: Realsense pipeline and vehicle object closed.")
     #Now reboot camera using a GPIO to acces the mosfet before rebooting the script
-    gpio.output(mosfet,gpio.HIGH)
+    #GPIO.setmode(GPIO.BCM)
+    #GPIO.setup(mosfet, GPIO.OUT) #Set GPIO20 of the BCM as output
+    GPIO.output(mosfet,False)
     time.sleep(0.1)
-    gpio.output(mosfet,gpio.LOW)
-    gpio.cleanup()
+    GPIO.output(mosfet,True)
+    GPIO.cleanup()
     #Finally exit
     sys.exit(exit_code)
